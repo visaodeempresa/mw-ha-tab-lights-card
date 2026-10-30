@@ -149,6 +149,16 @@ HASS.entities["light.oculta"] = { area_id: "escritorio", hidden_by: "user" };
 HASS.states["light.sala"] = { state: "off", attributes: { friendly_name: "Sala" } };
 HASS.entities["light.sala"] = { area_id: "sala" };
 
+// sensores de luminosidade para teste do rainbow
+HASS.states["sensor.lux_mesa"] = { state: "120", attributes: { device_class: "illuminance", friendly_name: "Lux Mesa", unit_of_measurement: "lx" } };
+HASS.entities["sensor.lux_mesa"] = { area_id: "escritorio", device_id: "dev1" };
+
+HASS.states["sensor.lux_teto"] = { state: "350", attributes: { device_class: "illuminance", friendly_name: "Lux Teto", unit_of_measurement: "lx" } };
+HASS.entities["sensor.lux_teto"] = { area_id: "escritorio", device_id: "dev_teto" };
+
+HASS.states["sensor.lux_sala"] = { state: "50", attributes: { device_class: "illuminance", friendly_name: "Lux Sala", unit_of_measurement: "lx" } };
+HASS.entities["sensor.lux_sala"] = { area_id: "sala", device_id: "dev_sala" };
+
 const mk = (cfg) => {
   const el = new (customElements.get("mw-tab-lights-card"))();
   el.isConnected = true;
@@ -411,6 +421,65 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
   ok(cfgRb && cfgRb.tabs[0].cards.length === 2, "rainbow card compõe como card separado antes da grade");
   ok(cfgRb && cfgRb.tabs[0].cards[0].type === "custom:mw-rainbow-card", "primeiro card da aba é o rainbow");
   ok(cfgRb && cfgRb.tabs[0].cards[1].type === "grid", "segundo card da aba é a grade de botões");
+
+  /* ---------------------- rainbow e sensores de lux ---------------------- */
+  const { discoverIlluminance, mergeRainbow, makeRainbowCard } = require("../dist/mw-tab-lights-card.js");
+
+  const achadosLux = discoverIlluminance(HASS, "escritorio");
+  eq(achadosLux, ["sensor.lux_mesa", "sensor.lux_teto"], "descobre sensores de iluminância da área");
+
+  const rbMerged = mergeRainbow(HASS, { area: "escritorio" });
+  eq(rbMerged.map((s) => s.entity), ["sensor.lux_mesa", "sensor.lux_teto"], "mergeRainbow descobre da área");
+  ok(rbMerged[0].device === "dev1", "associa device_id quando disponível");
+
+  const rbCardObj = makeRainbowCard(HASS, rbMerged);
+  ok(rbCardObj.type === "custom:mw-rainbow-card", "tipo custom:mw-rainbow-card correto");
+  ok(rbCardObj.name === "LUMINOSIDADE", "nome padrão LUMINOSIDADE");
+  eq(rbCardObj.bands, [{ metric: "illuminance" }], "faixa padrão metric: illuminance");
+  eq(rbCardObj.sections.length, 2, "seções criadas com os 2 sensores");
+
+  // buildConfig filtra hidden: true do rainbow
+  const cRainbowHidden = mk({
+    area: "escritorio",
+    rainbow: {
+      type: "custom:mw-rainbow-card",
+      name: "LUMINOSIDADE",
+      sections: [
+        { device: "dev1", entities: { illuminance: "sensor.lux_mesa" }, hidden: true },
+        { device: "dev_teto", entities: { illuminance: "sensor.lux_teto" } }
+      ]
+    }
+  });
+  await tick(); await tick();
+  const cfgRbHidden = cRainbowHidden._child && cRainbowHidden._child._cfg;
+  const rbRendered = cfgRbHidden && cfgRbHidden.tabs[0].cards[0];
+  ok(rbRendered && rbRendered.sections.length === 1, "buildConfig remove seção com hidden: true");
+  ok(rbRendered && rbRendered.sections[0].entities.illuminance === "sensor.lux_teto", "somente a seção ativa é mantida");
+
+  // editor de rainbow: vis, up, down, del
+  const edRb = new (customElements.get("mw-tab-lights-card-editor"))();
+  edRb.setConfig({ area: "escritorio" });
+  edRb.hass = HASS;
+  await tick();
+  ok(edRb._visRb && edRb._visRb.length === 2, "editor descobriu sensores de lux da área");
+
+  const rbEvents = [];
+  edRb.addEventListener("config-changed", (ev) => rbEvents.push(ev.detail.config));
+
+  // toggle vis do primeiro sensor (lux_mesa)
+  edRb._rainbowAction("vis", 0);
+  const ev1 = rbEvents[rbEvents.length - 1];
+  ok(ev1 && ev1.rainbow && ev1.rainbow.sections[0].hidden === true, "toggle vis marca hidden: true no rainbow");
+
+  // reordenar: lux_teto sobe para o topo
+  edRb._rainbowAction("up", 1);
+  const ev2 = rbEvents[rbEvents.length - 1];
+  ok(ev2 && ev2.rainbow && ev2.rainbow.sections[0].entities.illuminance === "sensor.lux_teto", "up reordena sensores de lux");
+
+  // excluir: lux_teto é apagado
+  edRb._rainbowAction("del", 0);
+  const ev3 = rbEvents[rbEvents.length - 1];
+  ok(ev3 && ev3.rainbow && ev3.rainbow.sections.length === 1, "del remove sensor do rainbow");
 
   if (fails.length) {
     console.error(`\n✗ probe: ${fails.length} falha(s), ${pass} ok\n`);

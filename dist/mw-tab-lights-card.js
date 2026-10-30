@@ -16,7 +16,7 @@
 (() => {
   "use strict";
 
-  const VERSION = "0.2.0";
+  const VERSION = "0.3.0";
 
   /* ------------------------------------------------------------ utilidades */
 
@@ -197,6 +197,87 @@
     return out.sort((a, b) => friendly(hass, a).localeCompare(friendly(hass, b), "pt-BR"));
   };
 
+  const deviceOfEntity = (hass, id) =>
+    (hass && hass.entities && hass.entities[id] && hass.entities[id].device_id) || "";
+
+  /** sensores de luminosidade da área */
+  const discoverIlluminance = (hass, area) => {
+    if (!hass || !hass.states) return [];
+    const areaId = resolveArea(hass, area);
+    if (!areaId) return [];
+    const out = [];
+    for (const id of Object.keys(hass.states)) {
+      if (id.indexOf("sensor.") !== 0) continue;
+      const st = hass.states[id];
+      const dc = st && st.attributes && st.attributes.device_class;
+      const uom = st && st.attributes && st.attributes.unit_of_measurement;
+      const isIllum = dc === "illuminance" || uom === "lx" || uom === "lux" || id.indexOf("illuminance") !== -1;
+      if (!isIllum) continue;
+      const reg = (hass.entities && hass.entities[id]) || {};
+      if (reg.hidden_by || reg.disabled_by || reg.hidden === true) continue;
+      if (areaOfEntity(hass, id) !== areaId) continue;
+      out.push(id);
+    }
+    return out.sort((a, b) => friendly(hass, a).localeCompare(friendly(hass, b), "pt-BR"));
+  };
+
+  const RAINBOW_STYLE = "p {\n  padding-top: 5px !important;\n  padding-bottom: 5px !important;\n  letter-spacing: 1.5px !important;\n  text-shadow:\n    0 1px 2px rgba(0, 0, 0, 0.60),\n    0 2px 8px rgba(0, 0, 0, 0.35) !important;\n}\n\nha-icon {\n  color: gold;\n  padding-left: 5px !important;\n  padding-right: 0px !important;\n  filter:\n    drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55))\n    drop-shadow(0 2px 6px rgba(0, 0, 0, 0.30));\n}\n\nha-card {\n  background: rgba(68, 68, 68, 0.0) !important;\n  border: 0px solid rgba(255, 255, 255, 0.08);\n  border-radius: 12px 12px 12px 12px !important;\n}\n";
+
+  const getRainbowSensorId = (sec) => {
+    if (!sec) return "";
+    return (sec.entities && sec.entities.illuminance) || sec.illuminance || sec.entity || "";
+  };
+
+  const mergeRainbow = (hass, cfg) => {
+    const rb = cfg && cfg.rainbow;
+    const rawSections = (rb && Array.isArray(rb.sections)) ? rb.sections : [];
+    const listadas = rawSections.map((s) => {
+      const eid = getRainbowSensorId(s);
+      return {
+        entity: eid,
+        device: s.device || (hass && deviceOfEntity(hass, eid)) || "",
+        hidden: s.hidden === true,
+      };
+    }).filter((s) => !!s.entity);
+
+    const vistas = new Set(listadas.map((s) => s.entity));
+    const achadas = discoverIlluminance(hass, cfg && cfg.area);
+    for (const id of achadas) {
+      if (vistas.has(id)) continue;
+      listadas.push({
+        entity: id,
+        device: (hass && deviceOfEntity(hass, id)) || "",
+        hidden: false,
+        _discov: true,
+      });
+    }
+    const naArea = new Set(achadas);
+    return listadas.map((s) => ({ ...s, _orfa: !naArea.has(s.entity) }));
+  };
+
+  const makeRainbowCard = (hass, sensors, baseRainbow) => {
+    const existing = baseRainbow || {};
+    const sections = (sensors || []).map((s) => {
+      const dev = s.device || (hass && deviceOfEntity(hass, s.entity)) || "";
+      const sec = {
+        entities: { illuminance: s.entity }
+      };
+      if (dev) sec.device = dev;
+      if (s.hidden === true) sec.hidden = true;
+      return sec;
+    });
+    return {
+      type: "custom:mw-rainbow-card",
+      name: existing.name || "LUMINOSIDADE",
+      bands: existing.bands || [{ metric: "illuminance" }],
+      sections,
+      section_labels: existing.section_labels || "none",
+      band_labels: existing.band_labels || "none",
+      name_size: existing.name_size !== undefined ? existing.name_size : 15,
+      card_mod: existing.card_mod || { style: RAINBOW_STYLE },
+    };
+  };
+
   // Ícone que o dono escreveria: o nome da luz já diz o que ela é. É palpite
   // com queda garantida — nunca fica sem ícone.
   // A ORDEM importa: «LED da Mesa» casa com os dois, e o que ela é mesmo é
@@ -323,8 +404,24 @@
       : luzes;
 
     const extras = cfg.extra_cards || {};
+    let rainbowCard = cfg.rainbow;
+    if (rainbowCard && Array.isArray(rainbowCard.sections)) {
+      const activeSections = rainbowCard.sections.filter((s) => s && s.hidden !== true);
+      if (activeSections.length > 0) {
+        rainbowCard = {
+          ...rainbowCard,
+          sections: activeSections.map((s) => {
+            const cleanSec = { ...s };
+            delete cleanSec.hidden;
+            return cleanSec;
+          }),
+        };
+      } else {
+        rainbowCard = null;
+      }
+    }
     const preCards = []
-      .concat(cfg.rainbow ? [cfg.rainbow] : [])
+      .concat(rainbowCard ? [rainbowCard] : [])
       .concat(Array.isArray(extras.before) ? extras.before : [])
       .concat(Array.isArray(extras.header) ? extras.header : []);
 
@@ -703,8 +800,12 @@
     set hass(hass) {
       this._hass = hass;
       for (const f of this._forms || []) f.hass = hass;
-      // lista de luzes muda quando o registro muda — não a cada estado
-      if (this._reg !== (hass && hass.entities)) { this._reg = hass && hass.entities; this._renderLights(); }
+      // lista de luzes e sensores muda quando o registro muda — não a cada estado
+      if (this._reg !== (hass && hass.entities)) {
+        this._reg = hass && hass.entities;
+        this._renderLights();
+        this._renderRainbow();
+      }
     }
 
     /* Chaves que a casa reconhece: o que sobrar fora delas é entulho (ex.: o
@@ -775,6 +876,10 @@
           <div class="mtl-info" id="ainfo"></div>
           <div id="lights"></div>
           <div id="lightedit"></div>
+          <details class="mtl-sec" id="rbsec" open><summary>Sensores de luminosidade da área (Rainbow)</summary>
+            <div class="mtl-info" id="rbinfo"></div>
+            <div id="rblist"></div>
+            <div id="rbedit"></div></details>
           <details class="mtl-sec" id="defsec"><summary>Padrão de TODOS os botões</summary>
             <div class="mtl-info">Vale para todos; o que você mexer numa luz vence este padrão.</div>
             <div id="defform"></div></details>
@@ -815,6 +920,9 @@
 
         this._lightsEl = this._root.querySelector("#lights");
         this._editEl = this._root.querySelector("#lightedit");
+        this._rbList = this._root.querySelector("#rblist");
+        this._rbEdit = this._root.querySelector("#rbedit");
+        this._rbInfo = this._root.querySelector("#rbinfo");
         this._colorRows = this._root.querySelector("#colorrows");
         this._glass = this._root.querySelector("#glass");
         this._root.querySelector("#glassapply").addEventListener("click", () => {
@@ -827,6 +935,7 @@
       }
       this._renderAreaForm();
       this._renderLights();
+      this._renderRainbow();
       this._renderDefForm();
       this._renderTabForms();
       this._renderColors();
@@ -887,6 +996,7 @@
       this._patch(patch);
       this._renderAreaForm();
       this._renderLights();
+      this._renderRainbow();
     }
 
     /* ------------------------------- luzes ------------------------------- */
@@ -1129,6 +1239,143 @@
       }, "mushroom-light-card desta luz");
     }
 
+    /* ------------------------------ rainbow ------------------------------ */
+
+    _renderRainbow() {
+      if (!this._rbList || !this._config) return;
+      const sensors = this._hass ? mergeRainbow(this._hass, this._config) : (this._config.rainbow_sensors || []);
+      this._visRb = sensors;
+      const s = sig(sensors.map((x) => [x.entity, x.hidden, x.device, x._orfa]));
+      if (s === this._rbSig && this._rbList.children.length) return;
+      this._rbSig = s;
+      const n = sensors.length;
+      if (this._rbInfo) {
+        if (this._hass && this._config.area) {
+          const aid = resolveArea(this._hass, this._config.area);
+          this._rbInfo.textContent = `${n} sensor(es) de luminosidade em «${areaName(this._hass, aid)}».`;
+        } else {
+          this._rbInfo.textContent = "Sensores de luminosidade adicionados ao Rainbow do card.";
+        }
+      }
+      this._rbList.innerHTML = sensors.map((x, i) => {
+        const nome = this._hass ? friendly(this._hass, x.entity) : x.entity;
+        const plat = this._hass ? platformOf(this._hass, x.entity) : "";
+        const selo = plat
+          ? `<img class="mtl-brand" data-plat="${esc(plat)}" title="${esc(plat)}" alt="${esc(plat)}"
+               src="${BRANDS}/${encodeURIComponent(plat)}/icon.png">`
+          : `<span class="mtl-brand"></span>`;
+        return `<div class="mtl-row luz ${x.hidden === true ? "off" : ""}">
+          <button class="mtl-ib vis ${x.hidden === true ? "" : "on"}" data-ra="vis" data-ri="${i}"
+            title="${x.hidden === true ? "excluído do rainbow" : "aparece no rainbow"}">${x.hidden === true ? "☐" : "☑"}</button>
+          ${selo}
+          <span class="nm">${esc(nome)} <small>${esc(x.entity)}${x._orfa ? " · ⚠ fora da área" : ""}</small></span>
+          <button class="mtl-ib" data-ra="up" data-ri="${i}" ${i === 0 ? "disabled" : ""} title="subir">↑</button>
+          <button class="mtl-ib" data-ra="down" data-ri="${i}" ${i === n - 1 ? "disabled" : ""} title="descer">↓</button>
+          <button class="mtl-ib del" data-ra="del" data-ri="${i}" title="apagar do rainbow">✕</button>
+        </div>`;
+      }).join("") + `<div class="mtl-row"><span class="nm"></span>
+        <button class="mtl-chip add" data-ra="re">↻ redescobrir</button>
+        <button class="mtl-chip add" data-ra="add">+ sensor de outra área</button></div>`;
+
+      this._rbList.querySelectorAll("[data-ra]").forEach((b) =>
+        b.addEventListener("click", () => this._rainbowAction(b.dataset.ra, +b.dataset.ri)));
+
+      this._rbList.querySelectorAll("img.mtl-brand").forEach((img) => {
+        img.addEventListener("error", () => {
+          if (!img.dataset.fallback) {
+            img.dataset.fallback = "1";
+            img.src = `${BRANDS}/_/${encodeURIComponent(img.dataset.plat)}/icon.png`;
+          } else img.hidden = true;
+        });
+      });
+      this._renderRainbowEditor();
+    }
+
+    _rainbowAction(a, i) {
+      const sensors = (this._visRb || []).map((x) => ({ ...x }));
+      if (a === "re") {
+        this._rbSig = null;
+        this._setRainbowSensors(sensors);
+        this._renderRainbow();
+        return;
+      }
+      if (a === "add") {
+        this._addingRb = true;
+        this._renderRainbowEditor();
+        return;
+      }
+      if (a === "vis") {
+        if (sensors[i].hidden === true) delete sensors[i].hidden; else sensors[i].hidden = true;
+        this._rbSig = null;
+        this._setRainbowSensors(sensors);
+        this._renderRainbow();
+        return;
+      }
+      if (a === "up" && i > 0) {
+        [sensors[i - 1], sensors[i]] = [sensors[i], sensors[i - 1]];
+      } else if (a === "down" && i < sensors.length - 1) {
+        [sensors[i + 1], sensors[i]] = [sensors[i], sensors[i + 1]];
+      } else if (a === "del") {
+        sensors.splice(i, 1);
+      } else {
+        return;
+      }
+      this._rbSig = null;
+      this._setRainbowSensors(sensors);
+      this._renderRainbow();
+    }
+
+    _setRainbowSensors(sensors) {
+      const activeOrListed = sensors.filter((s) => !!s.entity);
+      if (!activeOrListed.length) {
+        const next = { ...this._config };
+        delete next.rainbow;
+        this._emit(next);
+        return;
+      }
+      const updatedRainbow = makeRainbowCard(this._hass, activeOrListed, this._config.rainbow);
+      this._emit({ ...this._config, rainbow: updatedRainbow });
+    }
+
+    _renderRainbowEditor() {
+      if (!this._rbEdit) return;
+      this._rbEdit.innerHTML = "";
+      if (this._addingRb) {
+        const box = document.createElement("div");
+        box.className = "mtl-edit";
+        box.innerHTML = `<div class="top"><span>Incluir um sensor de luminosidade de qualquer área</span>
+          <span style="flex:1"></span><button class="mtl-ib" data-close-rb="1">✕</button></div><div class="host"></div>`;
+        box.querySelector("[data-close-rb]").addEventListener("click", () => {
+          this._addingRb = false;
+          this._renderRainbowEditor();
+        });
+        this._rbEdit.appendChild(box);
+        const f = document.createElement("ha-form");
+        f.hass = this._hass;
+        f.computeLabel = (x) => LABELS[x.name] || x.name;
+        f.schema = [{ name: "entity", selector: { entity: { domain: ["sensor"] } } }];
+        f.data = {};
+        f.addEventListener("value-changed", (ev) => {
+          ev.stopPropagation();
+          const id = ev.detail.value && ev.detail.value.entity;
+          if (!id) return;
+          const sensors = (this._visRb || []).map((x) => ({ ...x }));
+          if (!sensors.some((x) => x.entity === id)) {
+            sensors.push({
+              entity: id,
+              device: (this._hass && deviceOfEntity(this._hass, id)) || "",
+              hidden: false,
+            });
+          }
+          this._addingRb = false;
+          this._rbSig = null;
+          this._setRainbowSensors(sensors);
+          this._renderRainbow();
+        });
+        box.querySelector(".host").appendChild(f);
+      }
+    }
+
     /* -------------------------------- abas ------------------------------- */
 
     _renderTabForms() {
@@ -1309,7 +1556,18 @@
 
   // o probe headless importa estas peças; no navegador não atrapalha ninguém
   if (typeof module !== "undefined" && module.exports) {
-    module.exports = { buildConfig, discoverLights, mergeLights, resolveArea, deepMerge, diffObj, VERSION };
+    module.exports = {
+      buildConfig,
+      discoverLights,
+      discoverIlluminance,
+      mergeLights,
+      mergeRainbow,
+      makeRainbowCard,
+      resolveArea,
+      deepMerge,
+      diffObj,
+      VERSION
+    };
   }
 
   console.info(`%c MW-TAB-LIGHTS-CARD %c ${VERSION} `,
