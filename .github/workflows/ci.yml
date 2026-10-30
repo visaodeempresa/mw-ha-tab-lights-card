@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "feature/**"
+      - "fix/**"
+      - "chore/**"
+      - develop
+      - release
+  pull_request:
+    branches: [develop, release, main]
+
+jobs:
+  check:
+    name: Sintaxe & probe
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Sintaxe
+        run: node --check dist/mw-tab-lights-card.js
+
+      - name: Probe headless (componente + editor)
+        run: node tools/probe.js
+
+      - name: hacs.json aponta para o arquivo que existe
+        run: |
+          set -euo pipefail
+          F=$(node -p "require('./hacs.json').filename")
+          test -f "dist/$F"
+
+      - name: Artefato para inspeção
+        uses: actions/upload-artifact@v4
+        with:
+          name: mw-tab-lights-card
+          path: dist/mw-tab-lights-card.js
+          retention-days: 7
