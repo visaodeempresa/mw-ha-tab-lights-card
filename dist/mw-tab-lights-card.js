@@ -16,7 +16,7 @@
 (() => {
   "use strict";
 
-  const VERSION = "0.1.3";
+  const VERSION = "0.2.0";
 
   /* ------------------------------------------------------------ utilidades */
 
@@ -323,6 +323,11 @@
       : luzes;
 
     const extras = cfg.extra_cards || {};
+    const preCards = []
+      .concat(cfg.rainbow ? [cfg.rainbow] : [])
+      .concat(Array.isArray(extras.before) ? extras.before : [])
+      .concat(Array.isArray(extras.header) ? extras.header : []);
+
     const grade = {
       type: "grid",
       square: cfg.square !== false,
@@ -333,7 +338,7 @@
 
     const tabs = [];
     const tb = { ...BUTTONS_TAB, ...clean(cfg.buttons_tab || {}) };
-    tabs.push(deepMerge({ label: tb.label, icon: tb.icon, cards: [grade] },
+    tabs.push(deepMerge({ label: tb.label, icon: tb.icon, cards: [...preCards, grade] },
       (cfg.tabs_yaml || {}).buttons || {}));
 
     if (cfg.brightness_tab !== false && (!escondeAba(cfg) || algumaAcesa(hass, cfg))) {
@@ -443,14 +448,16 @@
       const host = this._shell();
       if (!this._hass) return;                      // sem hass não há registro
 
-      if (!this._config.area) {
-        this._aviso("<b>MW Tab Lights</b><br>Escolha a <b>área</b> no editor — é dela que saem as luzes.");
+      if (!this._config.area && (!Array.isArray(this._config.lights) || !this._config.lights.length)) {
+        this._aviso("<b>MW Tab Lights</b><br>Escolha a <b>área</b> no editor ou declare as luzes em <code>lights</code>.");
         return;
       }
       const cfg = buildConfig(this._hass, this._config);
-      const temLuz = (cfg.tabs[0] && cfg.tabs[0].cards[0] && cfg.tabs[0].cards[0].cards || []).length > 0;
+      const gradeCard = cfg.tabs[0] && cfg.tabs[0].cards.find((c) => c && c.type === "grid");
+      const temLuz = (gradeCard && gradeCard.cards || []).length > 0;
       if (!temLuz) {
-        this._aviso(`<b>MW Tab Lights</b><br>Nenhuma luz na área <b>${esc(areaName(this._hass, resolveArea(this._hass, this._config.area)))}</b>.<br>
+        const aTxt = this._config.area ? ` na área <b>${esc(areaName(this._hass, resolveArea(this._hass, this._config.area)))}</b>` : "";
+        this._aviso(`<b>MW Tab Lights</b><br>Nenhuma luz encontrada${aTxt}.<br>
           Confira em <code>Configurações → Áreas</code> ou inclua as luzes à mão no editor.`);
         return;
       }
@@ -709,7 +716,7 @@
       const CASA = new Set(["area", "columns", "square", "auto_add", "hide_unavailable",
         "brightness_tab", "paper_color", "shell_color", "lights", "exclude",
         "button_defaults", "brightness_options", "buttons_tab", "brightness_tab_options",
-        "tabs_options", "tabs_yaml", "extra_cards", "extra_tabs", "yaml_override"]);
+        "tabs_options", "tabs_yaml", "extra_cards", "extra_tabs", "yaml_override", "rainbow"]);
       const limpo = {};
       for (const [k, v] of Object.entries(next || {})) {
         if (k === "type" || k === "grid_options" || k.startsWith("view_layout")

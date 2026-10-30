@@ -401,6 +401,17 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
   ok(/\.mtl-ib\.vis\{[^}]*min-width:\s*44px[^}]*min-height:\s*44px/.test(SRC_TXT),
     "sem regra de toque 44px para o vis");
 
+  // rainbow card antes da grade de botões
+  const cRainbow = mk({
+    area: "escritorio",
+    rainbow: { type: "custom:mw-rainbow-card", name: "LUMINOSIDADE" }
+  });
+  await tick(); await tick();
+  const cfgRb = cRainbow._child && cRainbow._child._cfg;
+  ok(cfgRb && cfgRb.tabs[0].cards.length === 2, "rainbow card compõe como card separado antes da grade");
+  ok(cfgRb && cfgRb.tabs[0].cards[0].type === "custom:mw-rainbow-card", "primeiro card da aba é o rainbow");
+  ok(cfgRb && cfgRb.tabs[0].cards[1].type === "grid", "segundo card da aba é a grade de botões");
+
   if (fails.length) {
     console.error(`\n✗ probe: ${fails.length} falha(s), ${pass} ok\n`);
     for (const f of fails) console.error("  · " + f);
