@@ -304,6 +304,94 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
   ok(!("columns" in last), "columns igual ao default foi escrito no YAML");
   ok(!("paper_color" in last), "paper_color igual ao default foi escrito no YAML");
 
+  /* --------- excluir de verdade (✕ → `exclude:`) ---------
+     O ✕ antigo só tirava da fila e, com auto_add, a luz voltava na
+     redescoberta seguinte — apagar era impossível. Agora a luz sai do YAML
+     E vai para `exclude:`; «+ luz de outra área» a traz de volta. */
+  const edDel = new (customElements.get("mw-tab-lights-card-editor"))();
+  edDel.setConfig({ area: "escritorio" });
+  edDel.hass = HASS;
+  await tick();
+  const excluido = [];
+  edDel.addEventListener("config-changed", (ev) => excluido.push(ev.detail.config));
+  const iMesa = (edDel._vis || []).map((l) => l.entity).indexOf("light.mesa");
+  ok(iMesa >= 0, "luz de teste não está na fila do editor");
+  edDel._lightAction("del", iMesa);
+  const cDel = excluido[excluido.length - 1] || {};
+  ok(!(cDel.lights || []).some((l) => l.entity === "light.mesa"),
+    "luz apagada não pode continuar no YAML");
+  ok((cDel.exclude || []).includes("light.mesa"),
+    "luz apagada precisa persistir em `exclude:`");
+  ok(!((edDel._vis || []).some((l) => l.entity === "light.mesa")),
+    "luz excluída NÃO pode voltar a aparecer na fila (era o bug do ✕)");
+  const cSemMesa = mnt(cDel, mkHass([]));
+  await tick(); await tick(); await tick();
+  const cfgSemMesa = cSemMesa._child && cSemMesa._child._cfg;
+  if (cfgSemMesa) {
+    const grade2 = cfgSemMesa.tabs[0].cards[0];
+    ok(!grade2.cards.some((c) => c.entity === "light.mesa"),
+      "com o YAML salvo, a luz excluída não volta na grade");
+  }
+
+  /* marcar ☐ numa luz descoberta materializa SÓ ela, não a fila inteira —
+     era o que enchia o YAML de `hidden: true` de toda a área */
+  const edT = new (customElements.get("mw-tab-lights-card-editor"))();
+  edT.setConfig({ area: "escritorio" });
+  edT.hass = HASS;
+  await tick();
+  const materia = [];
+  edT.addEventListener("config-changed", (ev) => materia.push(ev.detail.config));
+  const iLed = (edT._vis || []).map((l) => l.entity).indexOf("light.led_da_mesa");
+  edT._lightAction("vis", iLed);
+  const cMat = materia[materia.length - 1] || {};
+  eq((cMat.lights || []).map((l) => l.entity), ["light.led_da_mesa"],
+    "só a luz tocada pode materializar no YAML");
+  eq((cMat.lights || [])[0] && (cMat.lights || [])[0].hidden, true,
+    "e ela entra oculta");
+  ok(!("header" in cMat) && !("tabs_yaml" in cMat),
+    "salvo de materialização não pode trazer chave fora da casa");
+
+  /* «redescobrir» materializa a fila VISÍVEL: luz excluída não renasce */
+  const edRe = new (customElements.get("mw-tab-lights-card-editor"))();
+  edRe.setConfig({ area: "escritorio", exclude: ["light.coluninhas"] });
+  edRe.hass = HASS;
+  await tick();
+  const recfg = [];
+  edRe.addEventListener("config-changed", (ev) => recfg.push(ev.detail.config));
+  edRe._lightAction("re");
+  const cRe = recfg[recfg.length - 1] || {};
+  ok((cRe.lights || []).some((l) => l.entity === "light.mesa"),
+    "redescobrir materializa a fila");
+  ok(!(cRe.lights || []).some((l) => l.entity === "light.coluninhas"),
+    "excluída continua fora MESMO redescobrindo");
+  ok((cRe.exclude || []).includes("light.coluninhas"),
+    "a exclusão sobrevive ao redescobrir");
+
+  /* lixo de colagem/versão antiga morre no salvo (header do stub, etc.) */
+  const edLixo = new (customElements.get("mw-tab-lights-card-editor"))();
+  edLixo.setConfig({ header: "UPDATE PAYMENT METHOD", area: "escritorio", codfish: 1 });
+  edLixo.hass = HASS;
+  await tick();
+  const lixado = [];
+  edLixo.addEventListener("config-changed", (ev) => lixado.push(ev.detail.config));
+  edLixo._patch({ columns: 2 });
+  const cLixo = lixado[lixado.length - 1] || {};
+  ok(!("header" in cLixo) && !("codfish" in cLixo),
+    "lixo de versão antiga/colagem não pode sobreviver ao salvo");
+  ok(cLixo.area === "escritorio" && cLixo.columns === 2,
+    "o que era da casa continua");
+  /* chamada de volta: `_desexcluir` tira do exclude (a luz volta na fila) */
+  edLixo._emit({ ...edLixo._config, exclude: ["light.mesa"] });
+  edLixo.setConfig(edLixo._config);           // eco que o HA devolve após o emit
+  eq((edLixo._vis || []).map((l) => l.entity).indexOf("light.mesa"), -1,
+    "light excluída não deve aparecer na fila");
+  edLixo._desexcluir("light.mesa");
+  ok(!((edLixo._config.exclude || []).includes("light.mesa")),
+    "desexcluir tira a luz da exclusão");
+  edLixo.setConfig(edLixo._config);           // eco que o HA devolve após o emit
+  ok((edLixo._vis || []).some((l) => l.entity === "light.mesa"),
+    "luz chamada de volta aparece de novo na fila");
+
   // banner de versão no formato que o CI procura
   ok(infoBanner.some((l) => /MW-TAB-LIGHTS-CARD/.test(l)), "banner de versão ausente");
 
