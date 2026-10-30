@@ -42,6 +42,11 @@ aba de brilho (mushroom + `card_mod`) · **YAML editável pedaço por pedaço**
 (botão, card de brilho, config inteira), com merge sobre o gerado — editar o
 código não congela a descoberta automática.
 
+Desde a v0.1.3, o **✕ apaga de verdade**: a luz sai do YAML **e** vai para
+`exclude:`, de onde a descoberta não a traz de volta («+ luz de outra área» a
+chama de volta). E o editor só escreve no YAML o que você tocou: luz que
+entrou por descoberta e ficou intocada não vira linha no YAML.
+
 ## Chaves
 
 | chave | padrão | o quê |

@@ -234,13 +234,18 @@
     return (e && e.platform) || "";
   };
 
-  /** lista final: a ordem do YAML manda; luz nova da área entra no fim. */
+  /** lista final: a ordem do YAML manda; luz nova da área entra no fim;
+   *  excluída (`exclude:`) NÃO volta — é a decisão de quem apagou. */
   const mergeLights = (hass, cfg) => {
     const listadas = Array.isArray(cfg.lights) ? cfg.lights.map((l) => ({ ...l })) : [];
     const vistas = new Set(listadas.map((l) => l.entity));
+    const exclidas = new Set(Array.isArray(cfg.exclude) ? cfg.exclude : []);
     const achadas = discoverLights(hass, cfg.area);
     if (cfg.auto_add !== false) {
-      for (const id of achadas) if (!vistas.has(id)) listadas.push({ entity: id });
+      for (const id of achadas) {
+        if (vistas.has(id) || exclidas.has(id)) continue;
+        listadas.push({ entity: id, _discov: true });   // descoberta de agora
+      }
     }
     const naArea = new Set(achadas);
     return listadas.map((l) => ({ ...l, _orfa: !naArea.has(l.entity) }));
@@ -268,7 +273,7 @@
   const buttonConfig = (hass, cfg, l) => {
     const over = { ...l };
     delete over.hidden; delete over.button_yaml; delete over.bright_yaml;
-    delete over.entity; delete over._orfa;
+    delete over.entity; delete over._orfa; delete over._discov;
     const g = guessIcons(hass, l.entity);
     const base = {
       type: "custom:simple-button-card",
@@ -695,10 +700,24 @@
       if (this._reg !== (hass && hass.entities)) { this._reg = hass && hass.entities; this._renderLights(); }
     }
 
+    /* Chaves que a casa reconhece: o que sobrar fora delas é entulho (ex.: o
+     * `header: UPDATE PAYMENT METHOD` herdado do stub do mw-tab-card, morto
+     * no YAML). Tudo de verdade continua passando — wrapper do HA, extras e
+     * o `yaml_override` inteiro — e o que a casa não conhece sai na hora do
+     * salvo, sem sombra no YAML. */
     _emit(next) {
-      this._config = next;
+      const CASA = new Set(["area", "columns", "square", "auto_add", "hide_unavailable",
+        "brightness_tab", "paper_color", "shell_color", "lights", "exclude",
+        "button_defaults", "brightness_options", "buttons_tab", "brightness_tab_options",
+        "tabs_options", "tabs_yaml", "extra_cards", "extra_tabs", "yaml_override"]);
+      const limpo = {};
+      for (const [k, v] of Object.entries(next || {})) {
+        if (k === "type" || k === "grid_options" || k.startsWith("view_layout")
+          || k.startsWith("layout") || k === "visibility" || CASA.has(k)) limpo[k] = v;
+      }
+      this._config = limpo;
       this.dispatchEvent(new CustomEvent("config-changed",
-        { bubbles: true, composed: true, detail: { config: next } }));
+        { bubbles: true, composed: true, detail: { config: limpo } }));
     }
     _patch(patch) {
       const next = { ...this._config, ...patch };
@@ -709,9 +728,32 @@
       this._emit(next);
     }
     _lights() { return (this._config.lights || []).map((l) => ({ ...l })); }
-    _setLights(lights) {
-      const limpo = lights.map((l) => { const c = { ...l }; delete c._orfa; return c; });
-      this._emit({ ...this._config, lights: limpo });
+    /** Fica no YAML o que já era decisão E o que o dono tocou agora. Luz só
+     *  descoberta, sem toque nenhum, volta para o automático — é o que impede
+     *  o editor de descobrir TODA a área no YAML a cada mexidinha. */
+    _setLights(luzes, tocadas) {
+      const antes = new Map((this._config.lights || []).map((l) => [l.entity, l]));
+      const toque = tocadas instanceof Set ? tocadas : null;
+      const limpo = luzes
+        .filter((l) => l.entity && (!toque || antes.has(l.entity) || toque.has(l.entity)))
+        .map((l) => { const c = { ...l }; delete c._orfa; delete c._discov; return c; });
+      const next = { ...this._config };
+      if (limpo.length) next.lights = limpo; else delete next.lights;
+      this._emit(next);
+    }
+    /** luz desapareceu do YAML e não pode voltar na redescoberta exclusão. */
+    _excluir(entity) {
+      if (!entity) return;
+      const excl = new Set(Array.isArray(this._config.exclude) ? this._config.exclude : []);
+      excl.add(entity);
+      this._emit({ ...this._config, exclude: [...excl] });
+    }
+    /** o dono chamou de volta: sai da exclusão (senão ela devorava a volta). */
+    _desexcluir(entity) {
+      const excl = (this._config.exclude || []).filter((e) => e !== entity);
+      const next = { ...this._config };
+      if (excl.length) next.exclude = excl; else delete next.exclude;
+      this._emit(next);
     }
 
     /* ------------------------------- layout ------------------------------ */
@@ -865,7 +907,7 @@
           <button class="mtl-ib" data-a="edit" data-i="${i}" title="opções do botão">✎</button>
           <button class="mtl-ib" data-a="up" data-i="${i}" ${i === 0 ? "disabled" : ""} title="subir">↑</button>
           <button class="mtl-ib" data-a="down" data-i="${i}" ${i === n - 1 ? "disabled" : ""} title="descer">↓</button>
-          <button class="mtl-ib del" data-a="del" data-i="${i}" title="tirar da lista">✕</button>
+          <button class="mtl-ib del" data-a="del" data-i="${i}" title="apagar (some do YAML e não volta)">✕</button>
         </div>`;
       }).join("") + `<div class="mtl-row"><span class="nm"></span>
         <button class="mtl-chip add" data-a="re">↻ redescobrir</button>
@@ -894,13 +936,30 @@
       }
       if (a === "add") { this._adding = true; this._renderLightEditor(); return; }
       if (a === "edit") { this._sel = this._sel === i ? null : i; this._adding = false; this._renderLightEditor(); return; }
-      if (a === "vis") { if (luzes[i].hidden === true) delete luzes[i].hidden; else luzes[i].hidden = true; }
+      if (a === "vis") {
+        if (luzes[i].hidden === true) delete luzes[i].hidden; else luzes[i].hidden = true;
+        // tocada: materializa SÓ a luz que o dono marcou, não a fila inteira
+        this._lightsSig = null;
+        this._setLights(luzes, new Set([luzes[i].entity]));
+        this._renderLights();
+        return;
+      }
       else if (a === "up" && i > 0) [luzes[i - 1], luzes[i]] = [luzes[i], luzes[i - 1]];
       else if (a === "down" && i < luzes.length - 1) [luzes[i + 1], luzes[i]] = [luzes[i], luzes[i + 1]];
-      else if (a === "del") { luzes.splice(i, 1); this._sel = null; }
+      else if (a === "del") {
+        const fora = luzes[i].entity;
+        luzes.splice(i, 1);
+        this._sel = null;
+        // exclusão de verdade: some do YAML e não volta na redescoberta
+        this._excluir(fora);
+        this._lightsSig = null;
+        this._setLights(luzes, new Set());
+        this._renderLights();
+        return;
+      }
       else return;
       this._lightsSig = null;
-      this._setLights(luzes);
+      this._setLights(luzes);   // ordem é decisão da fila inteira: materializa
       this._renderLights();
     }
 
@@ -909,7 +968,7 @@
       if (!luzes[i]) return;
       luzes[i] = { entity: luzes[i].entity, ...clean({ ...luzes[i], ...patch }) };
       if (patch.hidden === true) luzes[i].hidden = true;
-      this._setLights(luzes);
+      this._setLights(luzes, new Set([luzes[i].entity]));
       this._lightsSig = null;
       this._renderLights();
     }
@@ -992,7 +1051,9 @@
           const luzes = (this._vis || []).map((l) => { const c = { ...l }; delete c._orfa; return c; });
           if (!luzes.some((l) => l.entity === id)) luzes.push({ entity: id });
           this._adding = false; this._lightsSig = null;
-          this._setLights(luzes); this._renderLights();
+          this._desexcluir(id);                       // quem chamou de volta
+          this._setLights(luzes, new Set([id]));      // materializa só a nova
+          this._renderLights();
         });
         box.querySelector(".host").appendChild(f);
         return;
@@ -1035,7 +1096,7 @@
         const luzes = (this._vis || []).map((x) => { const c = { ...x }; delete c._orfa; return c; });
         luzes[i] = { entity: l.entity, ...clean(over) };
         if (over.hidden === true) luzes[i].hidden = true;
-        this._setLights(luzes);
+        this._setLights(luzes, new Set([l.entity]));
         this._lightsSig = null;
         // a lista mostra nome/ícone: atualiza só o rótulo, sem remontar o form
         const row = this._lightsEl.children[i];
@@ -1047,7 +1108,8 @@
       yamlBox(box.querySelector(".yb"), this._hass, gerado, (val) => {
         const luzes = (this._vis || []).map((x) => { const c = { ...x }; delete c._orfa; return c; });
         luzes[i] = { ...luzes[i], button_yaml: diffObj(gerado, val) };
-        this._setLights(luzes); this._lightsSig = null; this._renderLights();
+        this._setLights(luzes, new Set([luzes[i].entity]));
+        this._lightsSig = null; this._renderLights();
       }, "grava só o que você mudou (merge sobre o gerado)");
 
       const geradoBri = this._hass ? brightConfig(this._hass, { ...DEFAULTS, ...this._config }, l) : {};
@@ -1055,7 +1117,8 @@
       yamlBox(box.querySelector(".yb2"), this._hass, alvo, (val) => {
         const luzes = (this._vis || []).map((x) => { const c = { ...x }; delete c._orfa; return c; });
         luzes[i] = { ...luzes[i], bright_yaml: diffObj(alvo, val) };
-        this._setLights(luzes); this._lightsSig = null; this._renderLights();
+        this._setLights(luzes, new Set([luzes[i].entity]));
+        this._lightsSig = null; this._renderLights();
       }, "mushroom-light-card desta luz");
     }
 
