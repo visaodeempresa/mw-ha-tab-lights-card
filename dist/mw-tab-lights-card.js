@@ -16,7 +16,7 @@
 (() => {
   "use strict";
 
-  const VERSION = "0.3.1";
+  const VERSION = "0.4.0";
 
   /* ------------------------------------------------------------ utilidades */
 
@@ -81,6 +81,36 @@
       label: `${h[1]} · tom ${i + 1}${i === 0 ? " (mais claro)" : i === 6 ? " (mais escuro)" : ""}`,
     }))));
   // <<< paper-dark-palette v1
+
+
+  // >>> paper-grafite-palette v1 — fonte canônica: /Volumes/SSD-T1-01/CLAUDE-SSD/IA/lib/paper-grafite-palette/paper-grafite-palette.js
+  // 7 tons de grafite (1 = mais claro, 7 = mais encardido). Matiz 30° da
+  // casa, saturação 6–13%: neutro de propósito — grafite não é colorido.
+  // A saturação sobe devagar com a escuridão, mas JAMAIS alcança a escala
+  // das matizes encardidas (que sobe a 28%): a linha grafite é neutra.
+  const GRAFITE_HUE = 30;
+  const GRAFITE_TONES = [[26, 6], [22, 7], [19, 8], [16, 9], [13, 10], [10, 12], [8, 13]];
+  const GRAFITE_DEFAULT = "linear-gradient(145deg, #2b2825, #161411)";
+  const GRAFITE_INK = "rgba(247, 244, 236, 0.94)";
+  const isGrafite = (key) => /^grafite-[1-7]$/.test(String(key || "").trim());
+  const grafiteGradient = (key) => {
+    const m = isGrafite(key) && /^grafite-([1-7])$/.exec(String(key).trim());
+    if (!m) return GRAFITE_DEFAULT;
+    const [l, s] = GRAFITE_TONES[+m[1] - 1];
+    return `linear-gradient(145deg, hsl(${GRAFITE_HUE}, ${s}%, ${l}%), hsl(${GRAFITE_HUE}, ${s + 4}%, ${Math.max(4, l - 6)}%))`;
+  };
+  const grafiteStops = (key) => {
+    const m = isGrafite(key) && /^grafite-([1-7])$/.exec(String(key).trim());
+    if (!m) return ["#2b2825", "#161411"];
+    const [l, s] = GRAFITE_TONES[+m[1] - 1];
+    return [`hsl(${GRAFITE_HUE}, ${s}%, ${l}%)`, `hsl(${GRAFITE_HUE}, ${s + 4}%, ${Math.max(4, l - 6)}%)`];
+  };
+  const grafiteOptions = () => GRAFITE_TONES.map((t, i) => ({
+    value: `grafite-${i + 1}`,
+    label: `Grafite · tom ${i + 1}${i === 0 ? " (mais claro)" : i === 6 ? " (mais encardido)" : ""}`,
+  }));
+  // <<< paper-grafite-palette v1
+
 
   // ---- cor: parse / compose (mantém alfa, que o desenho usa muito) ----
   const parseColor = (str) => {
@@ -1118,7 +1148,7 @@
               options: data.confirm_paper_dark === true ? paperDarkOptions() : paperOptions() } } },
           ] : []),
         ] : []),
-        { name: "paper_color", selector: { select: { mode: "dropdown", options: paperOptions() } } },
+        { name: "paper_color", selector: { select: { mode: "dropdown", options: paperOptions().concat(grafiteOptions()) } } },
         { name: "icon_size", selector: { number: { min: 8, max: 200, step: 1, mode: "box", unit_of_measurement: "px" } } },
         ...(bare ? [] : [
           { name: "name_position", selector: { select: { mode: "dropdown", options: [
@@ -1454,7 +1484,7 @@
 
     _renderColors() {
       this._paperForm.hass = this._hass;
-      this._paperForm.schema = [{ name: "paper_color", selector: { select: { mode: "dropdown", options: paperOptions() } } }];
+      this._paperForm.schema = [{ name: "paper_color", selector: { select: { mode: "dropdown", options: paperOptions().concat(grafiteOptions()) } } }];
       this._paperForm.data = { paper_color: this._config.paper_color || DEFAULTS.paper_color };
 
       const campos = [

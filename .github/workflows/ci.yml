@@ -1,3 +1,9 @@
+# CI — card/elemento de arquivo único, sem build: a verificação é sintaxe +
+# probe headless (instancia o componente e o editor fora do navegador).
+# Roda nas branches de trabalho e em todo PR que aponta para a main.
+#
+# GERADO por IA/tools/mw-devops.sh — não editar à mão.
+# Fonte canônica: IA/lib/mw-devops/templates/ci.yml
 name: CI
 
 on:
@@ -16,9 +22,9 @@ jobs:
     name: Sintaxe & probe
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "22"
 
@@ -34,8 +40,14 @@ jobs:
           F=$(node -p "require('./hacs.json').filename")
           test -f "dist/$F"
 
+      - name: A versão vive onde o release vai procurar
+        # trava a armadilha do sed que vira no-op silencioso no auto-release
+        run: |
+          set -euo pipefail
+          grep -aqE 'const VERSION = "[0-9]+\.[0-9]+\.[0-9]+"' dist/mw-tab-lights-card.js
+
       - name: Artefato para inspeção
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: mw-tab-lights-card
           path: dist/mw-tab-lights-card.js
