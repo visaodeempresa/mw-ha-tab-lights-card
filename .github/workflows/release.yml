@@ -1,3 +1,9 @@
+# Fallback manual: push de tag v* → anexa o JS na Release daquela tag.
+# O caminho normal é o auto-release.yml (merge na main). Este existe para
+# republicar um asset ou marcar uma versão à mão sem tocar na main.
+#
+# GERADO por IA/tools/mw-devops.sh — não editar à mão.
+# Fonte canônica: IA/lib/mw-devops/templates/release.yml
 name: Release
 
 on:
@@ -11,9 +17,9 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "22"
 
@@ -23,9 +29,10 @@ jobs:
           node tools/probe.js
 
       - name: Upload asset to release
-        uses: softprops/action-gh-release@v2
+        uses: svenstaro/upload-release-action@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
-          generate_release_notes: true
-          files: dist/mw-tab-lights-card.js
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: dist/mw-tab-lights-card.js
+          asset_name: mw-tab-lights-card.js
+          tag: ${{ github.ref }}
+          overwrite: true
