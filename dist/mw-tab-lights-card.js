@@ -16,7 +16,7 @@
 (() => {
   "use strict";
 
-  const VERSION = "0.4.0";
+  const VERSION = "0.5.0";
 
   /* ------------------------------------------------------------ utilidades */
 
@@ -173,6 +173,19 @@
   };
 
   const BUTTONS_TAB = { label: "LUZES", icon: "mdi:ceiling-light-multiple" };
+  // espelho do filete do simple-button-card (este card só repassa; quem
+  // desenha é o botão). Mantido à mão igual à fonte.
+  const TRIM_OPTIONS = [
+    { value: "none", label: "Sem filete" },
+    { value: "gold", label: "Ouro" },
+    { value: "silver", label: "Prata" },
+    { value: "bronze", label: "Bronze" },
+    { value: "diamond", label: "Diamante" },
+    { value: "emerald", label: "Esmeralda" },
+    { value: "ruby", label: "Rubi" },
+    { value: "rose", label: "Quartzo rosa" },
+    { value: "topaz", label: "Topázio" },
+  ];
   const BRIGHT_TAB = { label: "BRILHO", icon: "mdi:tune-variant" };
 
   /* ------------------------------------------- descoberta das luzes da área */
@@ -659,6 +672,8 @@
     color_on_border: "Ligado: borda",
     color_off_border: "Desligado: borda",
     color_unavail: "Indisponível: destaque",
+    trim: "Filete no perímetro (ouro, prata, bronze…)",
+    trim_animate: "Brilho discreto animado no filete",
     // abas (espelho do MW Tab Card)
     label: "Texto da aba",
     icon: "Ícone da aba",
@@ -1149,6 +1164,8 @@
           ] : []),
         ] : []),
         { name: "paper_color", selector: { select: { mode: "dropdown", options: paperOptions().concat(grafiteOptions()) } } },
+        { name: "trim", selector: { select: { mode: "dropdown", options: TRIM_OPTIONS } } },
+        { name: "trim_animate", selector: { boolean: {} } },
         { name: "icon_size", selector: { number: { min: 8, max: 200, step: 1, mode: "box", unit_of_measurement: "px" } } },
         ...(bare ? [] : [
           { name: "name_position", selector: { select: { mode: "dropdown", options: [
